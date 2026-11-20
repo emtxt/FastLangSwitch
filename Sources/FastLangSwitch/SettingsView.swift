@@ -18,8 +18,8 @@ struct SettingsView: View {
                     .frame(width: 56, height: 56)
                 Text("FastLangSwitch").font(.title2.bold())
                 Spacer()
-                Circle().fill(model.running ? Color.green : Color.orange).frame(width: 8, height: 8)
-                Text(model.preview ? "Preview" : model.recording ? "Recording" : model.running ? "Running" : "Paused")
+                Circle().fill(model.monitoringStatus == .running ? Color.green : Color.orange).frame(width: 8, height: 8)
+                Text(model.monitoringStatus.rawValue)
                     .font(.callout).foregroundStyle(.secondary)
             }
             .padding(24)
@@ -94,6 +94,8 @@ struct SettingsView: View {
                     if !model.accessibilityGranted {
                         Text("Allow FastLangSwitch in System Settings → Privacy & Security → Accessibility to access keyboard events.")
                             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text("If you rebuilt FastLangSwitch and access appears enabled, remove the old entry and add the app you currently use.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Button("Grant Accessibility Access…") { model.requestAccessibility() }
                     }
                     Button("Retry Keyboard Access") { model.retry() }
@@ -107,7 +109,7 @@ struct SettingsView: View {
                         Text("Secure Keyboard Entry is active. macOS may suspend switching in password fields or apps using secure input.")
                             .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
-                    if let error = model.error ?? sources.error {
+                    if let error = model.error ?? model.monitorError ?? sources.error {
                         Text(error).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
                 } header: { Text("Permissions & startup") }

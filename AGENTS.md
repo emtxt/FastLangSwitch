@@ -29,11 +29,14 @@ and responsive. Read `README.md` for setup requirements and known limitations.
   source-change notifications, and the global layout choice.
 - `Sources/FastLangSwitch/AppModel.swift`: settings, permissions, monitoring
   lifecycle, and Launch at Login.
+- `Sources/FastLangSwitch/MonitoringState.swift`: readiness decisions for
+  starting the keyboard monitor and showing why switching is unavailable.
 - `Sources/FastLangSwitch/NotificationObservation.swift`: main-queue notification
   delivery and observer-token cleanup.
 - `Sources/FastLangSwitch/main.swift`: AppKit lifecycle and settings window.
 - `Sources/FastLangSwitch/SettingsView.swift` and `KeyRecorder.swift`: settings UI.
 - `Tests/SwitchCoreTests/`: Swift Testing tests for gesture behavior.
+- `Tests/FastLangSwitchTests/`: Swift Testing tests for monitor readiness.
 - `Tests/UI/` and `scripts/test-secure-input.sh`: opt-in background-monitor
   integration probe; `scripts/secure-input-fixture.swift` is its UI fixture.
 - `Support/Info.plist`: app identity, icon, deployment target, and agent behavior.

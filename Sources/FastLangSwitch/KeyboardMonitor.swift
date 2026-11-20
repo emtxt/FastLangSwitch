@@ -15,7 +15,10 @@ final class KeyboardMonitor {
     private var key: SwitchKey
     private var bufferedDown: CGEvent?
     private let replayTag: Int64 = 0x464C535752
-    var isRunning: Bool { tap != nil }
+    var isRunning: Bool {
+        guard let tap, CFMachPortIsValid(tap) else { return false }
+        return CGEvent.tapIsEnabled(tap: tap)
+    }
 
     init(key: SwitchKey) {
         self.key = key
@@ -51,7 +54,7 @@ final class KeyboardMonitor {
                 return result
             }, userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            onFailure?("Keyboard access is unavailable. Enable FastLangSwitch in Accessibility, then retry. If macOS also requests Input Monitoring, allow it there too.")
+            onFailure?("macOS could not start the keyboard monitor. FastLangSwitch will retry automatically. Check Input Monitoring if macOS requests it.")
             return false
         }
         tap = newTap
@@ -59,6 +62,11 @@ final class KeyboardMonitor {
         runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: newTap, enable: true)
+        guard isRunning else {
+            stop()
+            onFailure?("macOS did not enable the keyboard monitor. FastLangSwitch will retry automatically.")
+            return false
+        }
         // This timer belongs to monitoring, not the settings view. It observes
         // secure-input transitions even when the tap receives no events.
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in

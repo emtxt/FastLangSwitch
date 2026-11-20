@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -96,6 +97,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 let application = NSApplication.shared
 if CommandLine.arguments.contains("--diagnostics") {
     let sources = InputSources()
+    let enabled = UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true
+    let loginStatus = SMAppService.mainApp.status
+    let loginDescription: String
+    switch loginStatus {
+    case .enabled: loginDescription = "enabled"
+    case .requiresApproval: loginDescription = "requires approval"
+    case .notRegistered: loginDescription = "not registered"
+    case .notFound: loginDescription = "not found"
+    @unknown default: loginDescription = "unknown"
+    }
+    print("App bundle: \(Bundle.main.bundlePath)")
+    print("Layout switching: \(enabled ? "enabled" : "disabled")")
+    print("Launch at Login: \(loginDescription)")
     print("Accessibility: \(AXIsProcessTrusted() ? "granted" : "not granted")")
     print("Secure input: \(IsSecureEventInputEnabled() ? "active" : "inactive")")
     print("Selectable input sources: \(sources.sources.count)")

@@ -35,6 +35,12 @@ The build script signs ad hoc by default. For a stable permission identity acros
 
 Settings apply immediately and persist in the app’s preferences. The app does not modify your system keyboard settings, enable/disable input sources, or keep a per-app layout database. Selections made using the native Input menu become the current global choice.
 
+## If switching stops after login
+
+Open FastLangSwitch to see why the keyboard monitor is stopped. **Accessibility required** means macOS hasn't granted access to the running copy. An ad hoc signature identifies one particular build, so a rebuild can invalidate an existing grant even when the old entry still appears enabled. In **Privacy & Security → Accessibility**, remove the old entry and add the exact app registered for Launch at Login. Use **Retry Keyboard Access** or reopen the app if needed. To keep the grant across rebuilds, sign consistently with the same Apple Development or Developer ID identity using `CODE_SIGN_IDENTITY`. A change of signing identity can require a new grant.
+
+**Waiting for keyboard** means the granted app couldn't start its event tap. It retries in the background with settings closed. Allow Input Monitoring for that same copy if macOS requests it. **Secure input active** means macOS is protecting keyboard input. Switching resumes after secure input ends. If the app never launches, check **Launch at Login** and make sure it points to the copy you intend to use.
+
 ## Tap and shortcut behavior
 
 Switching occurs **on release**, as soon as a solo tap is known. Switching on the initial press would change the language before it is possible to know whether the key will participate in a shortcut. There is no additional waiting interval, and holding a key alone still switches exactly once when released.
@@ -55,7 +61,7 @@ swift test
 build/FastLangSwitch.app/Contents/MacOS/FastLangSwitch --diagnostics
 ```
 
-The diagnostics command prints current permissions and the enabled source list without installing an event tap, changing the selected language, or opening a window. `--preview` opens settings without starting keyboard monitoring or restoring layouts, for UI inspection.
+The diagnostics command prints the app path, Launch at Login status, switching preference, Accessibility status, secure input, and the enabled source list without installing an event tap, changing the selected language, or opening a window. Run it from the exact app bundle you use. `--preview` opens settings without starting keyboard monitoring or restoring layouts, for UI inspection.
 
 Automated tests cover solo taps, release timing, shortcuts in either modifier order, overlapping left/right modifiers, repeats, rapid taps, existing held keys/buttons, clicks/scrolls, ordinary-key replay decisions, and gesture recovery after secure input hides releases. Hardware event delivery, TCC permission prompts, and switching across real input methods need manual testing on a permission-granted Mac:
 

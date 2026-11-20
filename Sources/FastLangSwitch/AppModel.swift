@@ -11,27 +11,35 @@ final class AppModel: ObservableObject {
     @Published var key: SwitchKey {
         didSet {
             if let data = try? JSONEncoder().encode(key) { defaults.set(data, forKey: "switchKey") }
-            configureMonitor()
+            refreshMonitoring(restart: key != oldValue)
         }
     }
     @Published var enabled: Bool {
         didSet {
             defaults.set(enabled, forKey: "enabled")
-            configureMonitor()
+            refreshMonitoring()
         }
     }
-    @Published var recording = false { didSet { configureMonitor() } }
+    @Published var recording = false { didSet { refreshMonitoring() } }
     @Published private(set) var accessibilityGranted = false
-    @Published private(set) var running = false
+    @Published private var tapRunning = false
     @Published private(set) var secureInput = false
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginNeedsApproval = false
     @Published var error: String?
+    @Published private(set) var monitorError: String?
     private let defaults = UserDefaults.standard
     private let monitor: KeyboardMonitor
     private var systemObservers: [NotificationObservation] = []
-    private var sleeping = false
+    @Published private var monitoringState = MonitoringState()
+    private var recoveryTimer: Timer?
     let preview: Bool
+
+    var monitoringStatus: MonitoringState.Status {
+        monitoringState.status(preview: preview, enabled: enabled, recording: recording,
+                               accessibilityGranted: accessibilityGranted, secureInput: secureInput,
+                               tapRunning: tapRunning)
+    }
 
     init(preview: Bool = false) {
         self.preview = preview
@@ -42,46 +50,48 @@ final class AppModel: ObservableObject {
         enabled = UserDefaults.standard.object(forKey: "enabled") as? Bool ?? true
         monitor = KeyboardMonitor(key: initialKey)
         monitor.onTap = { [weak self] in self?.inputSources.selectNext() }
-        monitor.onFailure = { [weak self] message in self?.error = message }
+        monitor.onFailure = { [weak self] message in
+            if self?.monitorError != message { self?.monitorError = message }
+        }
         monitor.onSecureInputChange = { [weak self] secure in self?.secureInput = secure }
         let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
-            systemObservers.append(NotificationObservation(center: center, name: name) { [weak self] in
-                self?.sleeping = true
-                self?.configureMonitor()
-            })
-        }
-        for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
-            systemObservers.append(NotificationObservation(center: center, name: name) { [weak self] in
-                self?.sleeping = false
-                self?.configureMonitor()
-            })
-        }
+        systemObservers.append(NotificationObservation(center: center, name: NSWorkspace.willSleepNotification) { [weak self] in
+            self?.monitoringState.sleeping = true
+            self?.refreshMonitoring()
+        })
+        systemObservers.append(NotificationObservation(center: center, name: NSWorkspace.didWakeNotification) { [weak self] in
+            self?.monitoringState.sleeping = false
+            self?.refreshMonitoring()
+        })
+        systemObservers.append(NotificationObservation(center: center, name: NSWorkspace.sessionDidResignActiveNotification) { [weak self] in
+            self?.monitoringState.sessionActive = false
+            self?.refreshMonitoring()
+        })
+        systemObservers.append(NotificationObservation(center: center, name: NSWorkspace.sessionDidBecomeActiveNotification) { [weak self] in
+            self?.monitoringState.sessionActive = true
+            self?.refreshMonitoring()
+        })
         refreshStatus()
     }
 
     func refreshStatus() {
-        let granted = AXIsProcessTrusted()
-        let wasGranted = accessibilityGranted
-        accessibilityGranted = granted
-        secureInput = IsSecureEventInputEnabled()
-        launchAtLogin = SMAppService.mainApp.status == .enabled
-        loginNeedsApproval = SMAppService.mainApp.status == .requiresApproval
-        if granted != wasGranted || (granted && enabled && !monitor.isRunning && !recording && !sleeping && !preview) {
-            configureMonitor()
+        refreshMonitoring()
+        let loginStatus = SMAppService.mainApp.status
+        if launchAtLogin != (loginStatus == .enabled) { launchAtLogin = loginStatus == .enabled }
+        if loginNeedsApproval != (loginStatus == .requiresApproval) {
+            loginNeedsApproval = loginStatus == .requiresApproval
         }
     }
 
     func requestAccessibility() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+        _ = AXIsProcessTrustedWithOptions(options)
         openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        configureMonitor()
+        refreshMonitoring()
     }
 
     func retry() {
-        accessibilityGranted = AXIsProcessTrusted()
-        configureMonitor()
+        refreshMonitoring(restart: true)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -95,7 +105,11 @@ final class AppModel: ObservableObject {
         refreshStatus()
     }
 
-    func stop() { monitor.stop() }
+    func stop() {
+        recoveryTimer?.invalidate()
+        recoveryTimer = nil
+        monitor.stop()
+    }
 
     func openKeyboardSettings() {
         openSettings("x-apple.systempreferences:com.apple.Keyboard-Settings.extension")
@@ -105,13 +119,40 @@ final class AppModel: ObservableObject {
         if let url = URL(string: url) { NSWorkspace.shared.open(url) }
     }
 
-    private func configureMonitor() {
-        inputSources.keepGlobal = false
-        monitor.stop()
-        running = false
-        guard enabled, accessibilityGranted, !recording, !sleeping, !preview else { return }
-        error = nil
-        running = monitor.start(key: key)
+    private func refreshMonitoring(restart: Bool = false) {
+        let granted = AXIsProcessTrusted()
+        if granted != accessibilityGranted { accessibilityGranted = granted }
+        let secure = IsSecureEventInputEnabled()
+        if secure != secureInput { secureInput = secure }
+
+        let status = monitoringState.status(preview: preview, enabled: enabled, recording: recording,
+                                            accessibilityGranted: granted, secureInput: secure,
+                                            tapRunning: !restart && monitor.isRunning)
+        var running = false
+        if status == .waitingForKeyboard {
+            running = monitor.start(key: key)
+        } else if status.keepsEventTap && !restart && monitor.isRunning {
+            running = true
+        } else if tapRunning || restart {
+            monitor.stop()
+        }
+        if monitorError != nil && (running || status != .waitingForKeyboard) { monitorError = nil }
+        if running != tapRunning { tapRunning = running }
         inputSources.keepGlobal = running
+
+        // Login and permission changes can happen with settings closed.
+        if enabled && !preview && !monitoringState.sleeping && monitoringState.sessionActive {
+            if recoveryTimer == nil {
+                let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refreshMonitoring() }
+                }
+                timer.tolerance = 0.25
+                RunLoop.main.add(timer, forMode: .common)
+                recoveryTimer = timer
+            }
+        } else {
+            recoveryTimer?.invalidate()
+            recoveryTimer = nil
+        }
     }
 }
